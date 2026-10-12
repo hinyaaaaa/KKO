@@ -1,0 +1,24 @@
+/* モデル取り込みダイアログ(js/model-import-ui.js が読み込む) */
+.mi-overlay {
+  position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(8, 10, 16, .82); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.mi-card {
+  width: 100%; max-width: 360px; padding: 26px 22px; border-radius: 18px; text-align: center;
+  background: #14161d; color: #f2efe8; border: 1px solid rgba(255, 255, 255, .12);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+.mi-title { margin: 0 0 12px; font-size: 17px; font-weight: 700; letter-spacing: .04em; }
+.mi-text, .mi-note { margin: 0 0 10px; font-size: 13px; line-height: 1.7; color: rgba(242, 239, 232, .78); }
+.mi-note { font-size: 12px; color: rgba(242, 239, 232, .58); }
+.mi-note strong { color: #f2efe8; font-weight: 600; }
+.mi-status { min-height: 1.4em; margin: 8px 0 12px; font-size: 12.5px; color: #9fd3ff; word-break: break-word; }
+.mi-status.error { color: #ff9c9c; }
+.mi-input { display: none; }
+.mi-pick, .mi-cancel {
+  display: block; width: 100%; appearance: none; border-radius: 999px; padding: 13px 18px;
+  font-size: 14px; font-weight: 600; letter-spacing: .06em; cursor: pointer;
+}
+.mi-pick { border: 1px solid #e7b94c; background: rgba(231, 185, 76, .18); color: #f2efe8; }
+.mi-pick:disabled { opacity: .5; }
+.mi-cancel { margin-top: 10px; border: 1px solid transparent; background: transparent; color: rgba(242, 239, 232, .6); }

@@ -1,0 +1,15 @@
+{
+  "name": "kko-dev-tools",
+  "private": true,
+  "type": "module",
+  "description": "KKOの開発補助(ヘッドレス撮影など)。アプリ本体はビルド不要で、これはdev用のみ。",
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "capture": "node tools/capture.mjs jobs/sample.json out"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.0",
+    "sharp": "^0.35.5",
+    "three": "0.160.0"
+  }
+}

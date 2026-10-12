@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KKO">
+<meta name="theme-color" content="#07070c">
+<link rel="apple-touch-icon" id="kko-icon" href="">
+<!-- ホーム画面アイコン(ADR-016、ADR-017でAlongSceneへ改称)：Flowlyの前身である
+     Altair(Altair_SPA.html)のアイコン生成手法(canvas上に8方向スターを
+     グラデーション線で描き、角丸の黒バッジに載せる)をそのまま踏襲し、
+     配色のみブランド色(黒×金)に置き換えた。画像ファイルを追加しない
+     ノービルド方針は維持。 -->
+<script id="kko-icon-gen">(function(){
+function drawKkoIcon(canvas,scale){
+  var S=canvas.width, ctx=canvas.getContext('2d'), cx=S/2, cy=S/2, r=S*0.21;
+  ctx.fillStyle='#07070c';
+  ctx.beginPath();ctx.moveTo(r,0);ctx.lineTo(S-r,0);ctx.arcTo(S,0,S,r,r);
+  ctx.lineTo(S,S-r);ctx.arcTo(S,S,S-r,S,r);ctx.lineTo(r,S);ctx.arcTo(0,S,0,S-r,r);
+  ctx.lineTo(0,r);ctx.arcTo(0,0,r,0,r);ctx.closePath();ctx.fill();
+  ctx.save();
+  ctx.beginPath();ctx.moveTo(r,0);ctx.lineTo(S-r,0);ctx.arcTo(S,0,S,r,r);
+  ctx.lineTo(S,S-r);ctx.arcTo(S,S,S-r,S,r);ctx.lineTo(r,S);ctx.arcTo(0,S,0,S-r,r);
+  ctx.lineTo(0,r);ctx.arcTo(0,0,r,0,r);ctx.closePath();ctx.clip();
+  var ratio=S/160; ctx.translate(cx,cy); ctx.scale(scale*ratio,scale*ratio); ctx.translate(-80,-80);
+  var pts=[[80,12],[108,52],[148,80],[108,108],[80,148],[52,108],[12,80],[52,52]];
+  function ds(ss,lw,alpha){ctx.globalAlpha=alpha;ctx.strokeStyle=ss;ctx.lineWidth=lw;ctx.lineJoin='miter';ctx.miterLimit=10;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(var i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();ctx.stroke();}
+  var g=ctx.createLinearGradient(12,12,148,148);
+  g.addColorStop(0,'#fff3d6');g.addColorStop(0.32,'#f0c768');g.addColorStop(0.62,'#c98f2c');g.addColorStop(1,'#ffe9ad');
+  ds(g,20,1);
+  var gs=ctx.createLinearGradient(148,148,60,60);gs.addColorStop(0,'rgba(30,16,0,0.35)');gs.addColorStop(1,'rgba(30,16,0,0)');
+  ds(gs,20,1); ds('#fff',5,0.2); ds('#fff3d6',1.5,0.45);
+  // ADR-017: CSS側の --glass-spec (上端の specular highlight) と揃えた、
+  // ガラスの膨らみを表す柔らかいハイライト。角丸バッジのクリップは
+  // ここでもまだ有効なので、そのまま重ねるだけで縁からはみ出さない。
+  var hi=ctx.createRadialGradient(cx-S*0.18,cy-S*0.28,0,cx-S*0.18,cy-S*0.28,S*0.62);
+  hi.addColorStop(0,'rgba(255,255,255,.30)'); hi.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.globalAlpha=1; ctx.fillStyle=hi; ctx.fillRect(0,0,S,S);
+  ctx.restore();
+  // 中央にシャッター円(カメラアプリであることを示す小さな意匠)
+  ctx.beginPath(); ctx.arc(cx,cy,S*0.075,0,Math.PI*2);
+  ctx.fillStyle='#07070c'; ctx.fill();
+  ctx.lineWidth=S*0.012; ctx.strokeStyle='rgba(255,243,214,.8)'; ctx.stroke();
+}
+var c=document.createElement('canvas'); c.width=180; c.height=180; drawKkoIcon(c,0.72);
+var png=c.toDataURL('image/png');
+document.getElementById('kko-icon').href=png;
+['57','72','76','114','120','144','152','180'].forEach(function(sz){
+  var l=document.createElement('link'); l.rel='apple-touch-icon';
+  l.setAttribute('sizes',sz+'x'+sz); l.href=png; document.head.appendChild(l);
+});
+})();</script>
+<title>KKO</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- キャラクター選択画面(ADR-016): カルーセル+軌道バッジへ全面刷新 -->
+<div id="select-screen">
+  <div class="halo-field"><div class="halo-stars"></div></div>
+  <div class="select-wrap">
+    <div class="select-heading">
+      <h1>KKO</h1>
+      <p>一緒に撮影する推しを選んでください</p>
+    </div>
+    <div id="character-list" class="char-carousel"></div>
+    <div id="select-dots" class="select-dots"></div>
+  </div>
+</div>
+
+<!-- スタート画面 -->
+<div id="start-screen">
+  <div class="halo-field"><div class="halo-stars"></div></div>
+  <div class="start-card">
+    <div class="start-orb"></div>
+    <h1>準備OK</h1>
+    <div class="perm-list">
+      <div class="perm-row"><span class="perm-mark"><span class="icon-svg" data-icon="camera"></span></span><span><b>カメラ</b>への映像アクセス</span></div>
+      <div class="perm-row"><span class="perm-mark"><span class="icon-svg" data-icon="compass"></span></span><span><b>向きの検知</b>(コンパス較正用)</span></div>
+      <div class="perm-row"><span class="perm-mark"><span class="icon-svg" data-icon="motion"></span></span><span><b>モーション</b>(手ぶれ検知用)</span></div>
+    </div>
+    <button id="start-btn">はじめる</button>
+    <p class="start-note" id="start-error"></p>
+  </div>
+</div>
+
+<!-- 撮影ステージ -->
+<div id="stage-wrap">
+  <div id="stage">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <canvas id="three-canvas"></canvas>
+  </div>
+</div>
+<div id="flash-overlay"></div>
+<div id="countdown-overlay"><span id="countdown-num"></span></div>
+
+<!-- 配置ステップ(初回設置・再配置 共通)
+     ADR-017: 再配置時は従来ワントーストのみで消えてしまい、かつ
+     🎯ボタンでのキャンセルはドック自動収納(ui-gestures.js)により
+     実質押せなくなっていた(配置モードに入ると確定以外に抜け道が
+     ない状態だった)。常駐の説明+距離表示+常に押せるキャンセルを
+     追加して解消する。 -->
+<div id="placement-intro">
+  <div id="placement-intro-text">円をドラッグして立つ位置を決めてください<br>決まったら「ここに配置」を押してください</div>
+  <div id="placement-distance-badge"><span id="placement-distance-val">—</span>m先</div>
+</div>
+<div id="placement-actions">
+  <button id="placement-cancel-btn">キャンセル</button>
+  <button id="placement-confirm-btn">ここに配置</button>
+</div>
+
+<!-- 操作UI -->
+<div id="ui-layer">
+  <div id="top-controls">
+    <div id="top-bar">
+      <button id="dock-toggle" aria-label="メニュー"><span class="dt-wrap"><span class="dt-dot"></span><span class="dt-dot"></span><span class="dt-dot"></span></span></button>
+    </div>
+  </div>
+
+  <!-- ファン・ドック: トリガーから円弧状に展開する6個のボタン。
+       カメラ切替(旧switch-cam-btn)はhinya指示によりADR-016で廃止済み。
+       アングル切替(全身/上半身/顔アップ)は廃止し、代わりにデバッグログ
+       ボタン(旧・画面左上の🐛単独ボタン)をここへ集約した。 -->
+  <div id="top-dock">
+    <button id="reticle-btn" class="fan-btn" title="配置/再配置"><span class="icon-svg" data-icon="target"></span><span class="fan-label">位置</span></button>
+    <button id="shadow-adjust-btn" class="fan-btn" title="影の向き・長さ調整"><span class="icon-svg" data-icon="shadow"></span><span class="fan-label">影</span></button>
+    <button id="timer-btn" class="fan-btn" title="セルフタイマー"><span class="icon-svg" data-icon="timer"></span><span class="fan-label">タイマー</span></button>
+    <button id="mode-btn" class="fan-btn" title="写真/動画 切替"><span class="mode-chip-fan icon-svg" data-icon="camera"></span><span class="fan-label">写真</span></button>
+    <button id="reset-btn" class="fan-btn" title="推しを選び直す"><span class="icon-svg" data-icon="reset"></span><span class="fan-label">選び直す</span></button>
+    <button id="debug-btn" class="fan-btn" title="デバッグログ"><span class="icon-svg" data-icon="log"></span><span class="fan-label">ログ</span></button>
+  </div>
+
+  <div id="bottom-controls">
+    <div id="ring-label"></div>
+    <div id="pose-rings"></div>
+
+    <div id="bottom-bar">
+      <div id="shutter-status"></div>
+      <div id="capture-row">
+        <button id="shutter-btn" aria-label="撮影"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 撮影結果プレビュー -->
+<div id="result-screen">
+  <div id="result-imgwrap">
+    <img id="result-img" alt="撮影結果">
+    <video id="result-video" playsinline controls loop></video>
+  </div>
+  <p class="result-hint" id="result-hint">下にスワイプ、または「もう一度撮る」で撮り直せます</p>
+  <div id="result-actions">
+    <button id="share-btn">保存・共有する</button>
+    <button id="retake-btn">もう一度撮る</button>
+  </div>
+</div>
+
+<!-- 影の向き・長さ 手動調整パネル(ADR-016: ハロー・ダイヤル方式)
+     2026/08: モデルと重ならないよう画面下部中央から右側へ移動した。 -->
+<div id="shadow-panel">
+  <div class="shadow-panel-head">
+    <span>影の向き・長さ</span>
+    <button id="shadow-panel-close" class="dock-arrow" style="width:26px;height:26px;font-size:13px"><span class="icon-svg" data-icon="close"></span></button>
+  </div>
+  <p class="shadow-panel-sub">パッドの中で指を動かすだけで、影の向きと長さを同時に調整できます。</p>
+  <div class="shadow-dial-wrap">
+    <div class="shadow-dial disabled" id="shadow-dial">
+      <div class="shadow-dial-center"></div>
+      <div class="shadow-dial-handle" id="shadow-dial-handle"><span class="icon-svg" data-icon="sun"></span></div>
+      <span class="shadow-dial-label n">0°</span>
+    </div>
+  </div>
+  <p class="shadow-panel-hint" style="margin-bottom:12px">中心に近いほど影は短く、外側に近いほど長くなります</p>
+  <div class="shadow-panel-row">
+    <button id="shadow-manual-toggle" class="shadow-toggle-btn">オフ(自動)</button>
+    <button id="shadow-reset-btn" class="shadow-reset-btn">自動に戻す</button>
+  </div>
+  <p class="shadow-panel-hint">通常は環境認識による自動調整です。撮影時に影が不自然な場合だけ、上のボタンをオンにして手動で直してください。</p>
+</div>
+
+<!-- 指差しポーズ専用: 指す方向の微調整パネル。「指差し」ポーズを選んでいる
+     間だけ表示される(main.js側でポーズ切替と連動して表示/非表示・値リセット)。 -->
+<div id="point-adjust-panel">
+  <div class="point-adjust-head">指す方向</div>
+  <div class="point-adjust-row">
+    <label>左右</label>
+    <input type="range" id="point-yaw" min="-30" max="30" step="1" value="0">
+  </div>
+  <div class="point-adjust-row">
+    <label>上下</label>
+    <input type="range" id="point-pitch" min="-25" max="25" step="1" value="0">
+  </div>
+</div>
+
+<div id="pose-toast"></div>
+
+<div id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div id="loading-text">推しを読み込み中…</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script src="js/pose-ring.js"></script>
+<script src="js/ui-gestures.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
