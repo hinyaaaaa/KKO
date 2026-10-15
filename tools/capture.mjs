@@ -49,12 +49,27 @@ try {
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
-  const first = job.shots[0]?.state?.character;
+  // job.models: { "okayu": "path/to/model.zip" } を指定すると、ローカルassets(devPath)ではなく、
+  // 実際のアプリと同じ「端末内への取り込み」経路でモデルを読む(TGA→PNG変換などもここを通る)。
+  const models = job.models || {};
+  const modelIds = Object.keys(models);
+  const first = modelIds[0] || job.shots[0]?.state?.character;
   const q = new URLSearchParams({ clean: '1' });
+  if (modelIds.length) q.set('nodev', '1');
   if (first) q.set('char', first);
   await page.goto(`http://127.0.0.1:${port}/dev.html?${q}`);
   await page.waitForFunction(() => window.KkoDev && typeof window.KkoDev.ready === 'function', null, { timeout: 90000 });
-  await page.evaluate(() => window.KkoDev.ready());
+
+  for (const [i, id] of modelIds.entries()) {
+    if (i > 0) await page.evaluate((cid) => { window.KkoDev.loadCharacter(cid).catch(() => {}); }, id);
+    await page.waitForSelector('.mi-input', { state: 'attached', timeout: 60000 });
+    const t0 = Date.now();
+    await (await page.$('.mi-input')).setInputFiles(path.resolve(models[id]));
+    await page.waitForFunction(() => !document.querySelector('.mi-overlay'), null, { timeout: 600000 });
+    const info = await page.evaluate(async (cid) => (await window.KkoDev.installedModels()).find((m) => m.id === cid), id);
+    console.log(`imported ${id}: ${info.fileCount} files, ${(info.totalBytes / 1048576).toFixed(1)}MB, ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  }
+  await page.evaluate(() => window.KkoDev.ready(300000));
 
   const gl = await page.evaluate(() => {
     const c = document.createElement('canvas');

@@ -29,9 +29,11 @@
 export const CHARACTERS = [
   {
     id: 'kanata',
+    nameLines: ['天音', 'かなた'],
+    short: 'かなた',
     name: '天音かなた',
     thumb: '💫',
-    themeColor: '#76c0ea',
+    themeColor: '#5eb8f7',
     tagline: '来ちゃった・・・。',
     type: 'mmd',
     // モデル本体はリポジトリに含めない(ユーザーが端末内に取り込む。js/model-source.js)。
@@ -269,9 +271,11 @@ export const CHARACTERS = [
   },
   {
     id: 'kanade',
+    nameLines: ['音乃瀬', '奏'],
+    short: '奏',
     name: '音乃瀬奏',
     thumb: '🎹',
-    themeColor: '#f6c663',
+    themeColor: '#ffc83d',
     tagline: 'レロレロレロレロ',
     type: 'mmd',
     // モデル本体はリポジトリに含めない(ユーザーが端末内に取り込む。js/model-source.js)。
@@ -478,38 +482,48 @@ export const CHARACTERS = [
 ];
 
 /* ------------------------------------------------------------
-   猫又おかゆ — 暫定定義(モデル入手前のたたき台)
+   猫又おかゆ — ホロライブ公式配布モデル Ver1.0(PMX 2.0)
    ------------------------------------------------------------
-   ポーズ・表情は音乃瀬奏の定義を複製した「出発点」。標準ボーン名(腕・脚・首など)は
-   ホロライブ公式モデルで共通と見込んでいるが、モーフ名・髪のボーン名・身長(unitToMeter)は
-   モデルごとに違う。実物のPMXが手元に来たら、次で名前を確かめて定義を直すこと:
-     node tools/inspect-pmx.mjs <okayu.zip> --bones --morphs
-   expressions は、既存2キャラで使われている表記ゆれ(ウィンク/ウインク 等)を両方並べてある。
-   モデルに無いモーフ名は無視されるので、このままでも読み込みは壊れない。
-   tagline(キャッチコピー)は、本人の言葉を勝手に作らないため未設定(既定の文言になる)。
+   inspect-pmx.mjs で実物を確認した内容に基づく(2026-10)。
+   - 標準ボーン(腕・脚・首・指)は既存2キャラと同名。髪は hair_*、耳は n_mimi_*、しっぽは sippo_00〜09。
+   - 表情モーフは「ウィンク」(「ウインク」ではない)、「困る」(「困り」ではない)。
+   - 高さはモデル単位で約19.7(unitToMeter=0.081で約1.60m)。実身長は未確認のため暫定値。
+   - ポーズは奏の定義を複製して使っている。実物で確認し、直立・ピース・手を腰・ウインクが破綻しないことを見た。
+   利用規約(同梱readme): 二次創作を公開・頒布するときは「© 2019 cover corp.」を明記すること。
+   モデルの転載・再配布は禁止。→ モデルはリポジトリに含めず、端末内にだけ取り込む。
    ------------------------------------------------------------ */
 {
   const base = CHARACTERS.find((c) => c.id === 'kanade');
   CHARACTERS.push({
     id: 'okayu',
+    nameLines: ['猫又', 'おかゆ'],
+    short: 'おかゆ',
     name: '猫又おかゆ',
     thumb: '🍙',
-    themeColor: '#a98bd9', // 仮
+    themeColor: '#a98bff',
+    credit: '© 2019 cover corp.',
     type: 'mmd',
-    model: { pmx: 'okayu.pmx' },
+    model: { pmx: '猫又おかゆ.pmx' },
     devPath: 'assets/okayu/okayu.pmx',
-    unitToMeter: 0.081, // 仮: inspect-pmx.mjs の「高さ」から身長に合わせて調整する
+    unitToMeter: 0.081,
     expressions: {
       normal:    { emoji: '😐', label: '通常', weights: {} },
       smile:     { emoji: '😊', label: '笑顔', weights: { 'にこり': 1.0, '笑い': 1.0, '口角上げ': 0.6 } },
-      wink:      { emoji: '😉', label: 'ウインク', weights: { 'ウィンク': 1.0, 'ウインク': 1.0, '口角上げ': 0.4 } },
-      surprised: { emoji: '😲', label: 'びっくり', weights: { 'びっくり': 1.0, '上': 0.6, 'あ': 0.7 } },
-      troubled:  { emoji: '😟', label: '困り', weights: { '困る': 1.0, '困り': 1.0, 'じと目': 0.4, 'ジト目': 0.4, 'う': 0.3 } },
+      wink:      { emoji: '😉', label: 'ウインク', weights: { 'ウィンク': 1.0, 'にこり': 0.5, '口角上げ': 0.4 } },
+      surprised: { emoji: '😲', label: 'びっくり', weights: { 'びっくり': 1.0, 'あ': 0.7 } },
+      troubled:  { emoji: '😟', label: '困り', weights: { '困る': 1.0, 'じと目': 0.4, 'う': 0.3 } },
     },
     blinkMorph: 'まばたき',
     poses: JSON.parse(JSON.stringify(base.poses)),
     idle: {
-      bones: base.idle.bones.filter((b) => b.name === '上半身2' || b.name === '下半身'),
+      bones: [
+        { name: '上半身2', axis: 'x', amplitudeDeg: 0.8, periodSec: 4.5, phase: 0 },
+        { name: '下半身',  axis: 'z', amplitudeDeg: 0.5, periodSec: 7.5, phase: 1.2 },
+        { name: 'sippo_01', axis: 'z', amplitudeDeg: 3.0, periodSec: 3.6, phase: 0.4 },
+        { name: 'sippo_04', axis: 'z', amplitudeDeg: 4.0, periodSec: 3.6, phase: 1.1 },
+        { name: 'n_mimi_01_L', axis: 'z', amplitudeDeg: 1.5, periodSec: 5.2, phase: 0.8 },
+        { name: 'n_mimi_01_R', axis: 'z', amplitudeDeg: 1.5, periodSec: 5.6, phase: 2.0 },
+      ],
       expressionJitter: base.idle.expressionJitter,
     },
   });

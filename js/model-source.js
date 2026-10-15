@@ -56,7 +56,7 @@ export async function prepareMMDSource(def, MMDLoader, THREE) {
     const urls = [];
     for (const r of records) {
       const e = r.path.split('.').pop();
-      const u = URL.createObjectURL(new Blob([r.data], { type: MIME_BY_EXT[e] || 'application/octet-stream' }));
+      const u = URL.createObjectURL(new Blob([r.data], { type: r.mime || MIME_BY_EXT[e] || 'application/octet-stream' }));
       urls.push(u);
       byPath.set(r.path, u);
       const b = r.path.slice(r.path.lastIndexOf('/') + 1);
@@ -64,6 +64,8 @@ export async function prepareMMDSource(def, MMDLoader, THREE) {
     }
     const base = `${VIRTUAL_ORIGIN}${encodeURIComponent(def.id)}/`;
     const manager = new THREE.LoadingManager();
+    // 取り込み時に .tga の中身をPNGへ変換してある場合は、MMDLoaderのTGA読み込みを通常の画像読み込みに差し替える
+    if (meta.tgaAsPng) manager.addHandler(/\.tga$/i, new THREE.TextureLoader(manager));
     manager.setURLModifier((url) => {
       if (!url.startsWith(base)) return url;
       const rel = normalizeRel(url.slice(base.length));
@@ -79,4 +81,9 @@ export async function prepareMMDSource(def, MMDLoader, THREE) {
 
 export async function hasInstalledModel(id) {
   try { return !!(await getModelMeta(id)); } catch { return false; }
+}
+
+/** このモデルをいま読めるか(取り込み済み、または開発用のローカル配置がある) */
+export async function isModelAvailable(def) {
+  return (await hasInstalledModel(def.id)) || (await devPathExists(def));
 }

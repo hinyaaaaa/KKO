@@ -54,19 +54,20 @@ export async function listModels() {
 /**
  * 1モデルを丸ごと保存する(同じidは置き換え)。
  * @param {string} id
- * @param {{pmx: string, files: {path: string, data: ArrayBuffer}[]}} model
+ * @param {{pmx: string, files: {path: string, data: ArrayBuffer, mime?: string}[], tgaAsPng?: boolean}} model
+ * tgaAsPng: .tga の中身を取り込み時にPNGへ変換済み(model-source.jsが読み込み方を切り替える)
  */
-export async function saveModel(id, { pmx, files }) {
+export async function saveModel(id, { pmx, files, tgaAsPng = false }) {
   await deleteModel(id);
   const db = await openDb();
   const tx = db.transaction(['models', 'files'], 'readwrite');
   const fs = tx.objectStore('files');
   let totalBytes = 0;
   for (const f of files) {
-    fs.put({ id, path: f.path, data: f.data });
+    fs.put({ id, path: f.path, data: f.data, mime: f.mime || null });
     totalBytes += f.data.byteLength;
   }
-  tx.objectStore('models').put({ id, pmx, importedAt: Date.now(), totalBytes, fileCount: files.length });
+  tx.objectStore('models').put({ id, pmx, importedAt: Date.now(), totalBytes, fileCount: files.length, tgaAsPng });
   await done(tx);
 }
 

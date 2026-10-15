@@ -4,3 +4,4 @@ out/
 # モデル本体はリポジトリに含めない(ユーザーが端末内に取り込む / 開発用はローカルにだけ置く)
 assets/kanata/
 assets/kanade/
+fonts/src/

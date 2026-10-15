@@ -12,7 +12,10 @@ npm install
 node tools/capture.mjs jobs/sample.json out      # ヘッドレス撮影(要: ローカルの assets/<キャラ>/)
 node tools/test-model-import.mjs kanata kanata.zip   # 取り込み経路の通し検証
 node tools/inspect-pmx.mjs model.zip --bones --morphs   # モデルのボーン名・モーフ名を調べる
+node tools/ui-shots.mjs out/ui                   # 画面を順に操作して、各画面を撮影する(UI確認用)
+node tools/build-fonts.mjs                       # 見出し用フォントのサブセットを作り直す(キャラ追加で文字が増えたとき)
 ```
+画面の設計と自己採点: [docs/ui-review.md](docs/ui-review.md)
 詳細: [docs/dev-api.md](docs/dev-api.md)
 
 ## 権利について

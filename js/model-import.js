@@ -7,6 +7,7 @@
    ============================================================ */
 import { readZip } from './zip-reader.js';
 import { saveModel, requestPersistence } from './model-store.js';
+import { optimizeTexture } from './texture-optimize.js';
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'bmp', 'tga', 'gif', 'webp', 'spa', 'sph']);
 export const MIME_BY_EXT = {
@@ -61,20 +62,32 @@ export async function importModel(def, fileList, onProgress = () => {}) {
   const magic = new TextDecoder('ascii').decode(new Uint8Array(pmxData, 0, 4));
   if (magic !== 'PMX ') throw new ModelImportError('PMX形式ではないファイルです(PMD等には対応していません)');
 
-  // PMXのあるフォルダを基準にそろえる
+  // PMXのあるフォルダを基準にそろえる。テクスチャは端末内で最適化する(TGA→PNG、大きい画像の縮小)
   const prefix = dirOf(pmx.name);
   const targets = entries.filter((e) => IMAGE_EXT.has(ext(e.name)));
+  const maxTexture = (def.model && def.model.maxTexture) || 2048;
   const files = [{ path: baseOf(pmx.name).toLowerCase(), data: pmxData }];
+  let tgaAsPng = false;
+  let originalBytes = pmxData.byteLength;
   let i = 0;
   for (const e of targets) {
     i++;
-    onProgress(`展開中… ${i}/${targets.length}`);
-    const rel = e.name.startsWith(prefix) ? e.name.slice(prefix.length) : e.name;
-    files.push({ path: rel.toLowerCase(), data: await e.read() });
+    onProgress(`テクスチャを準備中… ${i}/${targets.length}`);
+    const rel = (e.name.startsWith(prefix) ? e.name.slice(prefix.length) : e.name).toLowerCase();
+    const raw = await e.read();
+    originalBytes += raw.byteLength;
+    let opt;
+    try {
+      opt = await optimizeTexture(rel, raw, maxTexture);
+    } catch (err) {
+      throw new ModelImportError(`テクスチャを読み込めませんでした(${baseOf(e.name)}): ${err.message}`);
+    }
+    if (ext(rel) === 'tga') tgaAsPng = true;
+    files.push({ path: rel, data: opt.data, mime: opt.mime });
   }
 
   onProgress('この端末に保存しています…');
-  await saveModel(def.id, { pmx: baseOf(pmx.name).toLowerCase(), files });
+  await saveModel(def.id, { pmx: baseOf(pmx.name).toLowerCase(), files, tgaAsPng });
   requestPersistence();
-  return { pmx: baseOf(pmx.name), fileCount: files.length, totalBytes: files.reduce((s, f) => s + f.data.byteLength, 0) };
+  return { pmx: baseOf(pmx.name), fileCount: files.length, originalBytes, totalBytes: files.reduce((s, f) => s + f.data.byteLength, 0) };
 }

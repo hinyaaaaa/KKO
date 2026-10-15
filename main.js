@@ -8,6 +8,8 @@ import { applyPhotoFinish } from './js/postfx.js';
 import { applyAtmosphericPerspective } from './js/atmosphere.js';
 import { CHARACTERS } from './js/characters-data.js';
 import { showModelImport } from './js/model-import-ui.js';
+import { isModelAvailable } from './js/model-source.js';
+import { initCredits } from './js/credits.js';
 import { loadCharacter as loadCharacterCore, disposeCharacter } from './js/character.js';
 import { initDiagnostics } from './js/diagnostics.js';
 import { createIdleMotionManager } from './js/idle-motion.js';
@@ -250,7 +252,7 @@ function loadCharacter(def) {
         showModelImport(def, {
           onDone: () => {
             loadingOverlay.classList.remove('hide');
-            loadingText.textContent = '推しを読み込み中…';
+            loadingText.textContent = '読み込み中';
             loadCharacter(def);
           },
           onCancel: () => returnToCharacterSelect(),
@@ -895,8 +897,8 @@ const TIMER_OPTIONS = [0, 3, 10];
 let timerIndex = 0;
 function updateTimerBtnLabel() {
   const v = TIMER_OPTIONS[timerIndex];
-  const iconSpan = timerBtn.querySelector('span:first-child');
-  if (iconSpan) iconSpan.textContent = v === 0 ? '⏱' : `⏱${v}`;
+  const labelSpan = timerBtn.querySelector('.fan-label');
+  if (labelSpan) labelSpan.textContent = v === 0 ? 'タイマー: なし' : `タイマー: ${v}秒`;
   timerBtn.classList.toggle('active', v > 0);
 }
 timerBtn.addEventListener('click', () => {
@@ -1050,8 +1052,9 @@ function updateModeBtnLabel() {
   const labelSpan = modeBtn.querySelector('.fan-label');
   // ADR-017: 絵文字のtextContent直書きから、icons.jsのSVG差し込みへ変更。
   if (iconSpan) iconSpan.innerHTML = ICONS[isVideoMode ? 'video' : 'camera'];
-  if (labelSpan) labelSpan.textContent = isVideoMode ? '動画' : '写真';
+  if (labelSpan) labelSpan.textContent = isVideoMode ? 'モード: 動画' : 'モード: 写真';
   modeBtn.classList.toggle('active', isVideoMode);
+  document.body.classList.toggle('is-video', isVideoMode);
 }
 modeBtn.addEventListener('click', () => {
   if (isRecording) return; // 録画中はモード切替させない
@@ -1140,11 +1143,12 @@ function returnToCharacterSelect() {
 
   if (CHARACTERS.length <= 1) {
     loadingOverlay.classList.remove('hide');
-    loadingText.textContent = '推しを読み込み中…';
+    loadingText.textContent = '読み込み中';
     loadCharacter(CHARACTERS[0]);
     return;
   }
   selectScreen.style.display = 'flex';
+  refreshModelTags();
 }
 resetBtn.addEventListener('click', returnToCharacterSelect);
 
@@ -1201,71 +1205,103 @@ animate();
 /* ============================================================
    起動フロー
    ============================================================ */
+/** 推しカラーを画面全体の地色にする(CSSの --theme)。選択・許可・読み込み・撮影結果が同じ色になる */
+function setTheme(def) {
+  document.documentElement.style.setProperty('--theme', (def && def.themeColor) || '#ffc83d');
+}
+
+/** 各スライドの「モデル 取り込み済み / 取り込みが必要」の表示を最新にする */
+async function refreshModelTags() {
+  const slides = characterList.querySelectorAll('.char-slide');
+  for (let i = 0; i < CHARACTERS.length; i++) {
+    const tag = slides[i] && slides[i].querySelector('.model-tag');
+    if (!tag) continue;
+    const ok = await isModelAvailable(CHARACTERS[i]);
+    tag.dataset.state = ok ? 'ready' : 'missing';
+    tag.textContent = ok ? 'モデル取り込み済み' : 'モデルの取り込みが必要';
+  }
+}
+
 function initCharacterSelect() {
   if (CHARACTERS.length <= 1) {
     selectScreen.style.display = 'none';
     currentCharacterIndex = 0;
+    setTheme(CHARACTERS[0]);
     return;
   }
   selectScreen.style.display = 'flex';
   characterList.innerHTML = '';
   if (selectDots) selectDots.innerHTML = '';
+  setTheme(CHARACTERS[0]);
+
+  // 選んだ推しで先へ進む(許可の説明 → 読み込み)
+  function proceed(def) {
+    selectScreen.style.display = 'none';
+    // スタート画面(許可フロー)を完走済みなら(=選び直し)、そのまま読み込む。
+    // 初回起動時は start-btn のハンドラ側で loadCharacter が呼ばれる。
+    if (appStarted) {
+      loadingOverlay.classList.remove('hide');
+      loadingText.textContent = '読み込み中';
+      loadCharacter(def);
+    }
+  }
 
   CHARACTERS.forEach((def, i) => {
+    const lines = def.nameLines || [def.name];
     const slide = document.createElement('div');
     slide.className = 'char-slide' + (i === 0 ? ' in-view' : '');
-    slide.style.setProperty('--theme', def.themeColor || 'var(--gold)');
     slide.innerHTML = `
-      <div class="badge-orbit">
-        <div class="badge-ring"></div>
-        <div class="badge-core"><span class="badge-emoji">${def.thumb || '⭐'}</span></div>
+      <h2 class="char-name" aria-label="${def.name}">${lines.map((l) => `<span aria-hidden="true">${l}</span>`).join('')}</h2>
+      <div class="char-meta">
+        <span class="model-tag" data-state="checking">モデルを確認中</span>
+        ${def.tagline ? `<p class="char-tagline">${def.tagline}</p>` : ''}
       </div>
-      <h2 class="char-name">${def.name}</h2>
-      <p class="char-tagline">${def.tagline || '一緒に、素敵な瞬間を。'}</p>
-      <button type="button" class="char-pick-btn">この娘とはじめる</button>
+      <button type="button" class="char-pick-btn">${def.short || def.name}と撮る</button>
     `;
-    slide.querySelector('.char-pick-btn').addEventListener('click', () => {
+    slide.querySelector('.char-pick-btn').addEventListener('click', async () => {
       currentCharacterIndex = i;
-      selectScreen.style.display = 'none';
-      // 2026/08追加: スタート画面(許可フロー)を既に完走済みなら
-      // (=推しの選び直しでこの画面に戻ってきた場合)、そのまま直接
-      // 選んだキャラクターを読み込む。初回起動時はstart-btnの
-      // ハンドラ側でloadCharacterが呼ばれるため、ここでは何もしない。
-      if (appStarted) {
-        loadingOverlay.classList.remove('hide');
-        loadingText.textContent = '推しを読み込み中…';
-        loadCharacter(def);
+      // モデルが端末に無いときは、許可の説明より先に取り込みへ案内する
+      if (!(await isModelAvailable(def))) {
+        showModelImport(def, { onDone: () => { refreshModelTags(); proceed(def); } });
+        return;
       }
+      proceed(def);
     });
     characterList.appendChild(slide);
 
     if (selectDots) {
-      const dot = document.createElement('span');
-      if (i === 0) dot.classList.add('active');
-      selectDots.appendChild(dot);
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'sel-tab';
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+      tab.textContent = def.short || def.name;
+      tab.addEventListener('click', () => {
+        characterList.scrollTo({ left: i * characterList.clientWidth, behavior: 'smooth' });
+      });
+      selectDots.appendChild(tab);
     }
   });
+  refreshModelTags();
 
-  // カルーセルのスクロール位置から「今どのカードが中央にあるか」を判定し、
-  // 見出しの背景色(--theme)・ドット・カード自身の強調表示を追従させる。
-  // ネイティブのscroll-snapに任せているため、ジェスチャー処理は一切書かない。
+  // スクロール位置から「いま中央にいる推し」を判定し、タブ・地色を追従させる。
+  // 横スワイプはネイティブのscroll-snapに任せ、ジェスチャー処理は書かない。
   let scrollRaf = null;
   characterList.addEventListener('scroll', () => {
     if (scrollRaf) return;
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = null;
       const idx = Math.round(characterList.scrollLeft / characterList.clientWidth);
-      const slides = characterList.querySelectorAll('.char-slide');
-      slides.forEach((s, i) => s.classList.toggle('in-view', i === idx));
+      characterList.querySelectorAll('.char-slide').forEach((sl, i) => sl.classList.toggle('in-view', i === idx));
       if (selectDots) {
-        Array.from(selectDots.children).forEach((d, i) => d.classList.toggle('active', i === idx));
+        Array.from(selectDots.children).forEach((t, i) => t.setAttribute('aria-selected', i === idx ? 'true' : 'false'));
       }
-      const activeDef = CHARACTERS[idx];
-      if (activeDef) selectScreen.style.setProperty('--theme', activeDef.themeColor || '#e7b94c');
+      setTheme(CHARACTERS[idx]);
     });
   }, { passive: true });
 }
 initCharacterSelect();
+initCredits(CHARACTERS);
 
 startBtn.addEventListener('click', async () => {
   startError.textContent = '';

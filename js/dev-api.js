@@ -30,6 +30,15 @@ function makeRng(seed) {
   };
 }
 
+/** 材質が持つテクスチャを [スロット名, テクスチャ] で列挙する。
+ *  MMDToonMaterial(ShaderMaterial)のテクスチャは uniforms の中にあるので、そこも見る。 */
+function textureSlots(m) {
+  const out = [];
+  Object.entries(m).forEach(([k, v]) => { if (v && v.isTexture) out.push([k, v]); });
+  if (m.uniforms) Object.entries(m.uniforms).forEach(([k, u]) => { if (u && u.value && u.value.isTexture) out.push([k, u.value]); });
+  return out;
+}
+
 const CAPTURE_HIDE_CSS = `
 body.dev-capture #dev-header,
 body.dev-capture #dev-character-switch,
@@ -89,6 +98,29 @@ export function installKkoDev(c) {
   }
 
   /* ---------------- 読み込み系 ---------------- */
+  /** 診断用: キャラの材質ごとのテクスチャの状態(読み込めているか・大きさ・種類) */
+  function inspectTextures() {
+    const ch = getCharacter();
+    const out = [];
+    if (!ch) return out;
+    ch.root.traverse((o) => {
+      if (!o.isMesh) return;
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
+        textureSlots(m).forEach(([k, v]) => {
+          const im = v.image;
+          out.push({
+            material: m.name, slot: k, loaded: !!im,
+            kind: im ? (im.constructor && im.constructor.name) : null,
+            w: im ? (im.width || im.naturalWidth || 0) : 0, h: im ? (im.height || im.naturalHeight || 0) : 0,
+            hasData: !!(im && im.data), format: v.format, transparent: m.transparent, opacity: m.opacity,
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  /* ---------------- 読み込み系 ---------------- */
   /** キャラの全テクスチャ画像のデコード完了を待つ(読み込み途中の絵を撮らないため) */
   async function waitForTextures(timeoutMs = 30000) {
     const ch = getCharacter();
@@ -98,11 +130,12 @@ export function installKkoDev(c) {
       ch.root.traverse((o) => {
         if (!o.isMesh) return;
         (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => {
-          Object.values(m).forEach((v) => {
-            if (!v || !v.isTexture) return;
+          textureSlots(m).forEach(([k, v]) => {
             const im = v.image;
             if (!im) { n++; return; }
             if (typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement && !(im.complete && im.naturalWidth > 0)) n++;
+            // TGA(DataTexture)は、読み込み前は1x1の空の画像が入っている
+            else if (!(im instanceof HTMLImageElement) && (im.width || 0) <= 1 && k !== 'gradientMap') n++;
           });
         });
       });
@@ -407,7 +440,7 @@ export function installKkoDev(c) {
   const api = {
     apiVersion: 1,
     // 読み込み
-    ready, isReady, waitForTextures, loadCharacter, listCharacters, installModel, installedModels, uninstallModel,
+    ready, isReady, waitForTextures, inspectTextures, loadCharacter, listCharacters, installModel, installedModels, uninstallModel,
     // キャラクター
     setPose, setExpression, setBones, getBones, listBones, setGlobalOffset, setPlacement,
     // カメラ

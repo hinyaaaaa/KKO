@@ -23,13 +23,13 @@ export function showModelImport(def, { onDone, onCancel } = {}) {
   root.className = 'mi-overlay';
   root.innerHTML = `
     <div class="mi-card" role="dialog" aria-modal="true">
-      <h2 class="mi-title">${def.name}のモデルを取り込む</h2>
-      <p class="mi-text">モデルのファイルはこのアプリに入っていません。あなたが持っているPMX形式のモデルを、zipのまま(またはPMXとテクスチャ画像をまとめて)選んでください。</p>
-      <p class="mi-note">選んだファイルは<strong>この端末の中にだけ</strong>保存され、外部へは送信されません。モデルの利用規約に従って、ご自身の責任でお使いください。</p>
+      <h2 class="mi-title">${def.name}の<br>モデルを取り込む</h2>
+      <p class="mi-text">モデルのファイルはこのアプリに入っていません。PMX形式のモデルを、zipのまま(またはPMXとテクスチャ画像をまとめて)選んでください。</p>
+      <p class="mi-note">選んだファイルは<strong>この端末の中にだけ</strong>保存され、外部へは送られません。モデルの利用規約に従って使ってください。</p>
       <p class="mi-status" aria-live="polite"></p>
       <input type="file" class="mi-input" multiple accept=".zip,.pmx,.png,.jpg,.jpeg,.bmp,.tga,.gif,.webp,.spa,.sph,application/zip">
-      <button type="button" class="mi-pick">ファイルを選ぶ</button>
-      <button type="button" class="mi-cancel">キャンセル</button>
+      <button type="button" class="mi-pick">モデルを選ぶ</button>
+      <button type="button" class="mi-cancel">あとにする</button>
     </div>`;
   document.body.appendChild(root);
   const $ = (s) => root.querySelector(s);

@@ -87,7 +87,7 @@ export function initShadowControlsUI(shadowRig, options = {}) {
 
   function setManualEnabled(v) {
     manualEnabled = v;
-    manualToggle.textContent = v ? 'オン(手動)' : 'オフ(自動)';
+    manualToggle.textContent = v ? '手動: オン' : '手動: オフ';
     manualToggle.classList.toggle('on', v);
     dial.classList.toggle('disabled', !v);
     if (v) {
