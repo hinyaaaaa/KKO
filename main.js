@@ -19,6 +19,16 @@ import { computePerceptualScaleFactor } from './js/perceptual-scale.js';
 import { createCompassCalibration } from './js/compass-calibration.js';
 import { looksLikeOutdoorSky } from './js/shadow/environment-shadow.js';
 import { ICONS, injectIcons } from './js/icons.js';
+import { onOrientation, onMotion, attachRealSensors, getScreenAngle } from './js/sensor-hub.js';
+import { OrientationTracker } from './js/orientation-tracker.js';
+import { FeedPlayer } from './js/feed-player.js';
+import { ColorMatchPass } from './js/color-match-pass.js';
+import { FloorReflection } from './js/floor-reflection.js';
+import { mark } from './js/check-log.js';
+import { GazeController, relativeYawToCamera } from './js/gaze.js';
+import { createSelectPreview } from './js/select-preview.js';
+import { initDeviceCheck } from './js/device-check.js';
+import { FeedRecorder, shareFeed } from './js/feed-recorder.js';
 
 // ADR-017: 絵文字アイコンを自作の線画SVGへ置き換え。DOM解析後(モジュール
 // スクリプトはdeferと同等)すぐに一括差し込みする。動的に切り替わる
@@ -201,6 +211,18 @@ const environmentLighting = createEnvironmentLighting({
   getEnvironmentState: () => diagnostics.getEnvironmentState(),
 });
 
+// 見た目の調和(2026/10): 背景の色統計に合わせた色調補正と、足元の床反射。
+// どちらも ?cm=0 / ?refl=0 で切れる。実機で重い・不自然なときの逃げ道。
+const colorMatch = new ColorMatchPass(renderer, { video, strength: 0.5, enabled: new URLSearchParams(location.search).get('cm') !== '0' });
+const floorReflection = new FloorReflection(scene, { renderer, strength: 0.16, enabled: new URLSearchParams(location.search).get('refl') !== '0' });
+[hemi, dir, rim].forEach((l) => l.layers.enable(1)); // 反射パスでキャラを照らすため
+
+/** 1フレーム分の描画(本番・撮影・録画で共通) */
+function renderFrame(dt = 1 / 60) {
+  floorReflection.update(renderer, camera);
+  colorMatch.render(effect, scene, camera, dt);
+}
+
 // コンパス較正(ADR-014の既知の制約への対応、ROADMAP.md「太陽方位角の
 // コンパス較正」)。iOS SafariのwebkitCompassHeadingを使い、
 // EnvironmentAnalyzerのsunAzimuth(地理方位、GPS未取得時は既定緯度+
@@ -228,9 +250,12 @@ const uiLayer = document.getElementById('ui-layer');
    コメント参照)
    ============================================================ */
 function loadCharacter(def) {
+  const tLoad = performance.now();
   loadCharacterCore(def, { MMDLoader, scene }, {
     onLoad: (character) => {
       activeCharacter = character;
+      mark('modelLoadMs', Math.round(performance.now() - tLoad));
+      FloorReflection.markReflected(character.root);
       // 初回設置が確定するまでキャラクター自体は非表示にしておく
       // (裏読み込みは先に済ませ、体感の待ち時間を減らす)。
       character.root.visible = false;
@@ -246,6 +271,7 @@ function loadCharacter(def) {
     },
     onError: (err) => {
       console.error('MMD load error', err);
+      mark('lastError', `モデル読み込み: ${err && (err.code || err.message) || err}`);
       // モデルが端末内に未取り込みなら、取り込みダイアログを出す(js/model-source.js)。
       if (err && err.code === 'MODEL_MISSING') {
         loadingOverlay.classList.add('hide');
@@ -357,7 +383,10 @@ function buildPoseRing(def) {
 function applyPlacementCore(p) {
   if (!activeCharacter) return;
 
-  const distanceFromCam = Math.abs(p.z - camera.position.z);
+  // 姿勢追従中は、横方向のずれも含めた実距離。固定カメラ時は従来通り奥行きのみ。
+  const distanceFromCam = trackingActive()
+    ? Math.hypot(p.x - camera.position.x, p.z - camera.position.z)
+    : Math.abs(p.z - camera.position.z);
 
   // 20260722平面推定指示書 Part7/Part8: 知覚スケール補正はあくまで演出。
   // p.scale自体は書き換えず、setTransformへ渡す直前でのみ
@@ -427,6 +456,8 @@ function applyPlacementCore(p) {
     environmentState
   );
   applyAtmosphericPerspective(activeCharacter.root, distanceFromCam);
+  floorReflection.setFloor(p.x, footY, p.z, Math.max(0.8, width * 1.8));
+  floorReflection.setVisible(activeCharacter.root.visible && !placementMode);
 }
 
 /** 確定済みのplacementに対してapplyPlacementCoreを呼ぶ、従来互換の薄いラッパー。 */
@@ -465,10 +496,28 @@ const placementDistanceVal = document.getElementById('placement-distance-val');
 let placementSnapshot = null;
 
 /** カメラからの距離(m)をバッジへ反映する。 */
-function updateDistanceBadge(zWorld) {
-  const distanceM = Math.abs(zWorld - camera.position.z);
+function updateDistanceBadge(zWorld, xWorld = 0) {
+  const distanceM = trackingActive()
+    ? Math.hypot(xWorld - camera.position.x, zWorld - camera.position.z)
+    : Math.abs(zWorld - camera.position.z);
   placementDistanceVal.textContent = distanceM.toFixed(1);
 }
+
+/* 画面上の点 → 仮想床との交点。姿勢追従が有効なときの配置・移動は、
+   従来の「ピクセル→距離換算」ではなくこのレイキャストで行う(カメラが傾いても足が床に付く)。 */
+const _ray = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+const _hit = new THREE.Vector3();
+function screenToFloor(clientX, clientY) {
+  const r = stage.getBoundingClientRect();
+  _ndc.set(((clientX - r.left) / r.width) * 2 - 1, -(((clientY - r.top) / r.height) * 2 - 1));
+  camera.updateMatrixWorld(true);
+  _ray.setFromCamera(_ndc, camera);
+  const ok = _ray.ray.intersectPlane(groundEstimator.getGroundPlane(), _hit);
+  return ok ? _hit.clone() : null;
+}
+/** ドラッグ開始時の「指の下の床点」と対象位置とのずれ。指に吸い付いて動くようにする。 */
+let floorDragOffset = null;
 
 /** レティクルを指定のワールドXZへ、現在の仮想床の高さで表示する。 */
 function showReticleAt(x, z) {
@@ -477,7 +526,7 @@ function showReticleAt(x, z) {
   placementReticle.show();
   placementConfirmBtn.classList.add('show');
   placementActions.classList.add('show');
-  updateDistanceBadge(z);
+  updateDistanceBadge(z, x);
   // ADR-017: 確定前でも実際にキャラクターがそこに立った見た目を
   // その場で確認できるよう、レティクルと同時にキャラクターも
   // プレビュー移動させる(「置いてから確認」→「見ながら置く」)。
@@ -576,6 +625,7 @@ reticleBtn.addEventListener('click', () => {
  * (キャンセル不可: placementCancelBtnはshowされないため常に非表示のまま)
  */
 function beginInitialPlacement() {
+  orientationTracker.resetYaw();
   pendingInitialPlacement = true;
   placementMode = true;
   showReticleAt(DEFAULT_PLACEMENT.x, DEFAULT_PLACEMENT.z);
@@ -622,11 +672,33 @@ function beginInitialPlacement() {
      縮小する。
    ============================================================ */
 
-function onDeviceOrientation(e) {
+// 2026/10: 本番とdev/リプレイの入力をそろえるため、センサーは sensor-hub 経由で受ける。
+// 重力基準の姿勢追従(js/orientation-tracker.js)を主線に戻した。傾き(pitch/roll)は
+// 重力で決まりドリフトしない。向き(yaw)は配置開始時の向きを正面とする相対値。
+// 位置(並進)は追わない(3DoF)。?track=0 で従来の固定カメラに戻せる。
+const APP_PARAMS = new URLSearchParams(location.search);
+const TRACK_ENABLED = APP_PARAMS.get('track') !== '0';
+const FEED_BASE = APP_PARAMS.get('feed');       // PCでのリプレイ(例: feeds/walk01)
+const REC_ENABLED = APP_PARAMS.has('rec');      // 実機で映像+センサーを録る
+const orientationTracker = new OrientationTracker();
+let feedPlayer = null;
+const feedRecorder = new FeedRecorder();
+// 視線(顔をカメラへ向ける)。頭ボーンのY回転の正負(GAZE_SIGN)を実機/devで一度確認するまで、既定はOFF。
+// ?gaze=1 で有効、?gazesign=-1 で向きを反転。
+const GAZE_ENABLED = APP_PARAMS.get('gaze') === '1';
+const gaze = new GazeController({ sign: Number(APP_PARAMS.get('gazesign')) === -1 ? -1 : 1 });
+
+function trackingActive() { return TRACK_ENABLED && orientationTracker.hasData(); }
+
+onOrientation((e) => {
   // コンパス較正(js/compass-calibration.js): iOS Safariのみ存在する
   // 非標準プロパティ。受信するたびに最新値を記録しておく。
   compassCalibration.recordHeading(e.webkitCompassHeading);
-}
+  if (TRACK_ENABLED) {
+    orientationTracker.screenAngle = feedPlayer ? feedPlayer.getScreenAngle() : getScreenAngle();
+    orientationTracker.feed(e, performance.now());
+  }
+});
 async function requestOrientationPermission() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
@@ -637,7 +709,7 @@ async function requestOrientationPermission() {
   return typeof DeviceOrientationEvent !== 'undefined';
 }
 function enableOrientationSensing() {
-  window.addEventListener('deviceorientation', onDeviceOrientation);
+  attachRealSensors();
 }
 
 /* ============================================================
@@ -653,6 +725,7 @@ function onDeviceMotion(e) {
   const rr = e.rotationRate || {};
   lastMotionMagnitude = Math.abs(rr.alpha || 0) + Math.abs(rr.beta || 0) + Math.abs(rr.gamma || 0);
 }
+onMotion(onDeviceMotion);
 async function requestMotionPermission() {
   if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
     try {
@@ -663,7 +736,7 @@ async function requestMotionPermission() {
   return typeof DeviceMotionEvent !== 'undefined';
 }
 function enableMotionTracking() {
-  window.addEventListener('devicemotion', onDeviceMotion);
+  attachRealSensors();
 }
 
 const STEADY_THRESHOLD = 12;   // deg/s の合計。これ未満なら「静止」とみなす
@@ -696,7 +769,23 @@ function waitForSteady() {
    facingModeは持たず常に背面カメラ(environment)のみを要求する。
    ============================================================ */
 async function startCamera() {
+  const tCam = performance.now();
   stopCamera();
+  // PCでのリプレイ: 録画した映像+センサーを、本番と同じ経路の入力として使う
+  if (FEED_BASE) {
+    try {
+      feedPlayer = new FeedPlayer(video, FEED_BASE);
+      await feedPlayer.start();
+    } catch (err) {
+      console.error(err);
+      startError.textContent = `素材を再生できませんでした: ${err.message}`;
+      throw err;
+    }
+    video.addEventListener('loadedmetadata', onVideoMeta, { once: true });
+    if (video.videoWidth) onVideoMeta();
+    mark('camera', { ok: true, ms: Math.round(performance.now() - tCam), w: video.videoWidth, h: video.videoHeight });
+    return;
+  }
   try {
     const constraints = {
       audio: false,
@@ -705,14 +794,39 @@ async function startCamera() {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     currentStream = stream;
     video.srcObject = stream;
+    if (REC_ENABLED) setupRecButton();
     await video.play();
     video.addEventListener('loadedmetadata', onVideoMeta, { once: true });
     if (video.videoWidth) onVideoMeta();
+    mark('camera', { ok: true, ms: Math.round(performance.now() - tCam), w: video.videoWidth, h: video.videoHeight });
   } catch (err) {
     console.error(err);
+    mark('camera', { ok: false, error: `${err.name || 'Error'}: ${err.message || err}` });
     startError.textContent = 'カメラを起動できませんでした。設定で許可を確認してください。';
     throw err;
   }
+}
+function setupRecButton() {
+  if (document.getElementById('rec-btn')) return;
+  const b = document.createElement('button');
+  b.id = 'rec-btn'; b.type = 'button'; b.textContent = '● 素材を録る';
+  b.style.cssText = 'position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);z-index:9999;padding:8px 12px;border-radius:999px;border:0;background:#d32f2f;color:#fff;font:600 13px system-ui';
+  b.addEventListener('click', async () => {
+    if (!feedRecorder.isRecording()) {
+      try { feedRecorder.start(currentStream); b.textContent = '■ 止めて保存'; } catch (e) { showPoseToast(e.message); }
+      return;
+    }
+    b.disabled = true;
+    const rec = await feedRecorder.stop(() => ({
+      placement: { ...placement }, character: CHARACTERS[currentCharacterIndex] && CHARACTERS[currentCharacterIndex].id,
+      cameraFovDeg: camera.fov, trackPitchDeg: orientationTracker.hasData() ? orientationTracker.getPitchDeg() : null,
+    }));
+    const name = `feed-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}`;
+    const r = await shareFeed(rec, name);
+    showPoseToast(r === 'cancelled' ? '保存をやめました' : '素材を書き出しました');
+    b.disabled = false; b.textContent = '● 素材を録る';
+  });
+  document.body.appendChild(b);
 }
 function stopCamera() {
   if (currentStream) { currentStream.getTracks().forEach((t) => t.stop()); currentStream = null; }
@@ -794,6 +908,13 @@ stage.addEventListener('touchstart', (e) => {
       // 増え続けて暴走的に感じる不具合になっていた(実機フィードバック対応)。
       touchState.reticleDistAtStart = Math.abs(placementReticle.getWorldPosition().z - camera.position.z);
     }
+    // 姿勢追従中: 指の下の床点と、動かす対象(レティクル/キャラ)のずれを覚える
+    floorDragOffset = null;
+    if (trackingActive()) {
+      const hit = screenToFloor(e.touches[0].clientX, e.touches[0].clientY);
+      const base = placementMode ? placementReticle.getWorldPosition() : { x: placement.x, z: placement.z };
+      if (hit) floorDragOffset = { x: base.x - hit.x, z: base.z - hit.z };
+    }
   } else if (e.touches.length >= 2) {
     touchState.mode = 'gesture';
     touchState.hadMultiTouch = true;
@@ -816,7 +937,23 @@ stage.addEventListener('touchmove', (e) => {
     const rect = stage.getBoundingClientRect();
     const vFovRad = THREE.MathUtils.degToRad(camera.fov);
 
-    if (placementMode) {
+    if (trackingActive() && floorDragOffset) {
+      // 床へのレイキャストで、指の下に足元が付いたまま動かす
+      const hit = screenToFloor(t.clientX, t.clientY);
+      if (hit) {
+        const newX = hit.x + floorDragOffset.x;
+        const newZ = THREE.MathUtils.clamp(hit.z + floorDragOffset.z, MIN_CHARACTER_DISTANCE_Z, MAX_CHARACTER_DISTANCE_Z);
+        const groundY = groundEstimator.getGroundHeight();
+        if (placementMode) {
+          placementReticle.setWorldPosition(newX, groundY, newZ);
+          updateDistanceBadge(newZ, newX);
+          previewPlacementAt(newX, groundY, newZ);
+        } else {
+          placement.x = newX; placement.z = newZ;
+          applyPlacement();
+        }
+      }
+    } else if (placementMode) {
       // 配置レティクルのドラッグ移動: 縦方向=奥行き(前後)、横方向=左右。
       // センサーに一切依存しない、既存の1本指ドラッグと同じ変換式だが、
       // 距離はドラッグ開始時点で固定する(touchStart参照、遠方での暴走対策)。
@@ -935,7 +1072,8 @@ let lastIsVideo = false;
 let isVideoMode = false;
 
 function capture() {
-  effect.render(scene, camera);
+  const tCap = performance.now();
+  renderFrame();
   const vw = video.videoWidth, vh = video.videoHeight;
   const out = document.createElement('canvas');
   out.width = vw; out.height = vh;
@@ -944,6 +1082,7 @@ function capture() {
   ctx.drawImage(renderer.domElement, 0, 0, vw, vh);
   applyPhotoFinish(out, { envTint: environmentLighting.getEstimatedTintColor() });
   out.toBlob((blob) => {
+    mark('capture', blob ? { ok: true, ms: Math.round(performance.now() - tCap), bytes: blob.size } : { ok: false, error: 'toBlobが空を返しました' });
     showResult(blob, false);
   }, 'image/png');
 }
@@ -1149,6 +1288,8 @@ function returnToCharacterSelect() {
   }
   selectScreen.style.display = 'flex';
   refreshModelTags();
+  const sp = getSelectPreview(); sp.revive();
+  sp.show(CHARACTERS[Math.round(characterList.scrollLeft / Math.max(1, characterList.clientWidth))] || CHARACTERS[currentCharacterIndex]);
 }
 resetBtn.addEventListener('click', returnToCharacterSelect);
 
@@ -1184,23 +1325,54 @@ if (IDLE_MOTION_ENABLED) {
 /* ============================================================
    レンダーループ
    ============================================================ */
+// 開発・自動検証用の読み取りフック(状態を見るだけ。操作はdev-api側)
+window.KkoApp = {
+  camera, placement, tracker: orientationTracker,
+  isTracking: () => trackingActive(),
+  feed: () => feedPlayer,
+  scene, renderer, colorMatch, floorReflection, renderFrame, environmentLighting,
+  applyPlacement, placementReticle, getCharacter: () => activeCharacter,
+  // 自動テスト用: 🎯ボタンを押した状態(配置モード)にする
+  enterPlacementMode: () => { placementMode = true; showReticleAt(placement.x, placement.z); },
+};
 let lastTime = performance.now();
+let fpsEma = null;
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
   const dt = Math.min(0.1, (now - lastTime) / 1000);
+  fpsEma = fpsEma == null ? 1 / dt : fpsEma * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
+  if (trackingActive()) mark('tracking', { active: true, pitch: orientationTracker.getPitchDeg() });
   lastTime = now;
 
   // 2026/07/26: camera.quaternionはジャイロで動かさず、常に固定のまま
   // にする方針へ変更した(詳細は「方位センサー」セクションのコメント参照)。
   // そのためここには何も書かない(意図的に空、将来また混乱しないように明記)。
+  // 重力基準の姿勢追従: センサーが来ているときだけカメラを動かす(無ければ従来の固定)
+  if (trackingActive()) {
+    camera.quaternion.copy(orientationTracker.getQuaternion());
+  }
+  if (GAZE_ENABLED && activeCharacter && activeCharacter.root.visible && !placementMode) {
+    activeCharacter.setGlobalOffset('headYaw', gaze.update(dt, relativeYawToCamera(placement.x, placement.z, placement.rotY, camera.position.x, camera.position.z)));
+  }
   if (activeCharacter) activeCharacter.update(dt);
   if (placementReticle.isVisible()) {
     placementReticle.updatePulse(dt);
   }
-  effect.render(scene, camera);
+  renderFrame(dt);
 }
 animate();
+window.addEventListener('error', (e) => mark('lastError', String(e.message || e)));
+window.addEventListener('unhandledrejection', (e) => mark('lastError', String((e.reason && e.reason.message) || e.reason)));
+if (APP_PARAMS.has('check')) {
+  initDeviceCheck({
+    getFps: () => fpsEma,
+    getRenderInfo: () => {
+      const s = renderer.getDrawingBufferSize(new THREE.Vector2());
+      return { buffer: `${s.x}x${s.y}`, cm: colorMatch.enabled, refl: floorReflection.enabled };
+    },
+  });
+}
 
 /* ============================================================
    起動フロー
@@ -1222,6 +1394,17 @@ async function refreshModelTags() {
   }
 }
 
+let selectPreview = null;
+function getSelectPreview() {
+  if (!selectPreview) {
+    selectPreview = createSelectPreview({
+      host: document.getElementById('select-preview'),
+      MMDLoader, loadCharacter: loadCharacterCore, disposeCharacter, isModelAvailable,
+    });
+  }
+  return selectPreview;
+}
+
 function initCharacterSelect() {
   if (CHARACTERS.length <= 1) {
     selectScreen.style.display = 'none';
@@ -1237,6 +1420,7 @@ function initCharacterSelect() {
   // 選んだ推しで先へ進む(許可の説明 → 読み込み)
   function proceed(def) {
     selectScreen.style.display = 'none';
+    getSelectPreview().destroy();   // 撮影画面のためにGPUを空ける
     // スタート画面(許可フロー)を完走済みなら(=選び直し)、そのまま読み込む。
     // 初回起動時は start-btn のハンドラ側で loadCharacter が呼ばれる。
     if (appStarted) {
@@ -1262,7 +1446,7 @@ function initCharacterSelect() {
       currentCharacterIndex = i;
       // モデルが端末に無いときは、許可の説明より先に取り込みへ案内する
       if (!(await isModelAvailable(def))) {
-        showModelImport(def, { onDone: () => { refreshModelTags(); proceed(def); } });
+        showModelImport(def, { onDone: () => { refreshModelTags(); getSelectPreview().reload(def); proceed(def); } });
         return;
       }
       proceed(def);
@@ -1297,8 +1481,10 @@ function initCharacterSelect() {
         Array.from(selectDots.children).forEach((t, i) => t.setAttribute('aria-selected', i === idx ? 'true' : 'false'));
       }
       setTheme(CHARACTERS[idx]);
+      getSelectPreview().show(CHARACTERS[idx]);
     });
   }, { passive: true });
+  getSelectPreview().show(CHARACTERS[0]);
 }
 initCharacterSelect();
 initCredits(CHARACTERS);
@@ -1321,10 +1507,13 @@ startBtn.addEventListener('click', async () => {
   // 結果が変わりうるため、両方のケースでの実機確認をお願いしたい。
   diagnostics.start();
   try {
-    const orientationOK = await requestOrientationPermission();
-    if (orientationOK) enableOrientationSensing();
-    const motionOK = await requestMotionPermission();
-    if (motionOK) enableMotionTracking();
+    if (!FEED_BASE) {
+      const orientationOK = await requestOrientationPermission();
+      mark('orientationPermission', orientationOK);
+      if (orientationOK) enableOrientationSensing();
+      const motionOK = await requestMotionPermission();
+      if (motionOK) enableMotionTracking();
+    }
     await startCamera();
     startScreen.style.display = 'none';
     loadCharacter(CHARACTERS[currentCharacterIndex]);

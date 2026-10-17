@@ -8,6 +8,7 @@
 import { readZip } from './zip-reader.js';
 import { saveModel, requestPersistence } from './model-store.js';
 import { optimizeTexture } from './texture-optimize.js';
+import { mark } from './check-log.js';
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'bmp', 'tga', 'gif', 'webp', 'spa', 'sph']);
 export const MIME_BY_EXT = {
@@ -43,6 +44,8 @@ async function toEntries(fileList) {
  * @param {(msg: string) => void} [onProgress]
  */
 export async function importModel(def, fileList, onProgress = () => {}) {
+  const tStart = performance.now();
+  let maxTexMs = 0;
   onProgress('ファイルを確認しています…');
   const entries = (await toEntries(fileList)).map((e) => ({ ...e, name: norm(e.name) }))
     .filter((e) => !e.name.startsWith('__MACOSX/') && !baseOf(e.name).startsWith('._'));
@@ -77,8 +80,10 @@ export async function importModel(def, fileList, onProgress = () => {}) {
     const raw = await e.read();
     originalBytes += raw.byteLength;
     let opt;
+    const tTex = performance.now();
     try {
       opt = await optimizeTexture(rel, raw, maxTexture);
+      maxTexMs = Math.max(maxTexMs, Math.round(performance.now() - tTex));
     } catch (err) {
       throw new ModelImportError(`テクスチャを読み込めませんでした(${baseOf(e.name)}): ${err.message}`);
     }
@@ -89,5 +94,7 @@ export async function importModel(def, fileList, onProgress = () => {}) {
   onProgress('この端末に保存しています…');
   await saveModel(def.id, { pmx: baseOf(pmx.name).toLowerCase(), files, tgaAsPng });
   requestPersistence();
-  return { pmx: baseOf(pmx.name), fileCount: files.length, originalBytes, totalBytes: files.reduce((s, f) => s + f.data.byteLength, 0) };
+  const totalBytes = files.reduce((s, f) => s + f.data.byteLength, 0);
+  mark('import', { ms: Math.round(performance.now() - tStart), textures: targets.length, maxTexMs, originalBytes, totalBytes });
+  return { pmx: baseOf(pmx.name), fileCount: files.length, originalBytes, totalBytes };
 }

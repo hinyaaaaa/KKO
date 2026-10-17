@@ -5,3 +5,6 @@ out/
 assets/kanata/
 assets/kanade/
 fonts/src/
+
+# 実機から録った素材(PCでのリプレイ用)
+feeds/

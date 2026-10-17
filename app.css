@@ -130,6 +130,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--paper); out
 }
 .char-pick-btn:active { transform: scale(.97); }
 
+/* 上半分: 取り込み済みモデルのプレビュー(js/select-preview.js)。文字とボタンの上の余白をそのまま使う。
+   キャンバスは absolute で埋めるだけにして、中身の大きさがレイアウトに戻らないようにする */
+#select-preview { position: relative; z-index: 1; flex: 1 1 0; min-height: 0; margin: 0 -24px; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+.select-preview-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity .4s var(--ease); }
+#select-preview[data-state="ready"] .select-preview-canvas { opacity: 1; }
+#select-screen .char-carousel { flex: 0 0 auto; }
+
 .sel-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font: 500 12px/1.4 var(--f-ui); color: rgba(0, 0, 0, .74); }
 
 /* ---------------- 許可の説明 ---------------- */
