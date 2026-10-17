@@ -1,0 +1,6 @@
+KKO.xcodeproj/
+build/
+build.log
+KKOCore/.build/
+.swiftpm/
+core-test.log

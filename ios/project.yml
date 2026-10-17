@@ -1,0 +1,36 @@
+name: KKO
+options:
+  bundleIdPrefix: com.hinyaaaaa
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  KKOCore:
+    path: KKOCore
+targets:
+  KKO:
+    type: application
+    platform: iOS
+    sources:
+      - KKO
+    dependencies:
+      - package: KKOCore
+    info:
+      path: KKO/Info.plist
+      properties:
+        CFBundleDisplayName: KKO
+        NSCameraUsageDescription: カメラ映像にキャラクターを重ねて撮影するために使います。映像は端末の外へ送信されません。
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities:
+          - arkit
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hinyaaaaa.kko
+        MARKETING_VERSION: "3.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"

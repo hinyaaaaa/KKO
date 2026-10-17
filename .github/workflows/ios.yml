@@ -1,0 +1,62 @@
+name: ios
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Core tests (swift test)
+        working-directory: ios/KKOCore
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee ../core-test.log
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (unsigned, for sideloading)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project KKO.xcodeproj \
+            -scheme KKO \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | tail -n 30
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Build/Products/Release-iphoneos/KKO.app Payload/
+          zip -qry KKO-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KKO-unsigned-ipa
+          path: KKO-unsigned.ipa
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          for f in ios/core-test.log ios/build.log; do
+            [ -f "$f" ] && grep -E "error:|Test Case .* failed|XCTAssert" "$f" | head -n 30 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          done
+          true
