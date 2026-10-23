@@ -7,6 +7,10 @@ on:
       - '.github/workflows/ios.yml'
   workflow_dispatch:
 
+# v3.0.1: ワークフローのトークン権限を読み取りのみに限定（成果物のアップロードには不要）
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-15
